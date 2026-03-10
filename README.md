@@ -26,5 +26,5 @@ Projeyi kendi ortamınızda (Terminal üzerinden) derleyip çalıştırmak için
 
 1. Repoyu bilgisayarınıza klonlayın:
    ```bash
-   git clone <sizin-github-repo-linkiniz>
-   cd <repo-klasoru>
+   git clone <https://github.com/nniissaa/syslog_.git>
+   cd <syslog_>
