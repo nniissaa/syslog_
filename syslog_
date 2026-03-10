@@ -1,0 +1,148 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+/**
+ * --- 1. DÜĞÜM (NODE) VERİ YAPISI ---
+ * Her bir Syslog kaydını temsil eden, gerçekçi veri alanlarına sahip düğüm.
+ * Çift bağlı liste (Doubly Linked List) prensibiyle tasarlanmıştır.
+ */
+typedef struct LogNode {
+    char timestamp[32];   // Kaydın tam olarak ne zaman oluştuğunu tutan alan.
+    int priority;         // Mesajın önem derecesi (0: Acil, 7: Hata Ayıklama).
+    char message[256];    // Log mesajı metni.
+    struct LogNode* next; // Sonraki loga işaret eden pointer.
+    struct LogNode* prev; // Önceki loga işaret eden pointer (Geriye dönük analiz için).
+} LogNode;
+
+/**
+ * --- 2. LİSTE KONTROL YAPISI ---
+ * O(1) karmaşıklığı ile veri ekleyebilmek için hem Head (Baş) hem de Tail (Kuyruk)
+ * pointer'larını bir arada tutan merkezi kontrol yapısı.
+ */
+typedef struct {
+    LogNode* head; // Listedeki en eski log.
+    LogNode* tail; // Listedeki en güncel (son eklenen) log.
+    int total_logs;
+} SyslogList;
+
+// Listeyi başlangıç durumuna getiren fonksiyon
+void init_list(SyslogList* list) {
+    list->head = NULL;
+    list->tail = NULL;
+    list->total_logs = 0;
+}
+
+/**
+ * --- 3. LİSTEYE O(1) HIZINDA LOG EKLEME FONKSİYONU ---
+ * Tail pointer kullanarak listeyi baştan sona taramadan direkt sona ekleme yapar.
+ */
+void add_log(SyslogList* list, int priority, const char* msg) {
+    // Bellekten düğüm için yer ayrılır
+    LogNode* newNode = (LogNode*)malloc(sizeof(LogNode));
+    if (newNode == NULL) {
+        printf("Hata: Dinamik bellek tahsisi basarisiz oldu!\n");
+        return;
+    }
+
+    // --- Zaman Damgası (Timestamp) Oluşturma ---
+    time_t rawtime;
+    struct tm * timeinfo;
+    time(&rawtime);
+    timeinfo = localtime(&rawtime);
+    strftime(newNode->timestamp, 32, "%Y-%m-%d %H:%M:%S", timeinfo);
+
+    // Veriler düğüme kopyalanır
+    newNode->priority = priority;
+    strncpy(newNode->message, msg, 255);
+    newNode->message[255] = '\0'; // Güvenlik için null terminator
+    
+    // Yeni düğüm listenin sonuna ekleneceği için next değeri her zaman NULL olur
+    newNode->next = NULL;
+
+    // --- Çift Yönlü Bağlantı Mantığı ---
+    if (list->head == NULL) {
+        // Liste boşsa, ilk düğüm hem head hem tail olur
+        newNode->prev = NULL;
+        list->head = newNode;
+        list->tail = newNode;
+    } else {
+        // Liste doluysa, yeni düğümü mevcut kuyruğun arkasına bağla
+        newNode->prev = list->tail;       // Yeni düğümün öncesi, eski son düğümü gösterir
+        list->tail->next = newNode;       // Eski son düğümün sonrası, yeni düğümü gösterir
+        list->tail = newNode;             // Kuyruk artık yeni düğümdür
+    }
+    
+    list->total_logs++;
+}
+
+/**
+ * --- 4. KRONOLOJİK OKUMA FONKSİYONU ---
+ * Head'den başlayarak Tail'e doğru logları yazdırır.
+ */
+void display_logs_forward(SyslogList* list) {
+    printf("\n=== LINUX SYSLOG KAYITLARI (KRONOLOJIK: ESKIDEN YENIYE) ===\n");
+    LogNode* current = list->head;
+    
+    while (current != NULL) {
+        printf("[%s] [Seviye: %d] >> %s\n", current->timestamp, current->priority, current->message);
+        current = current->next;
+    }
+    printf("-----------------------------------------------------------\n");
+}
+
+/**
+ * --- 5. TERSİNE OKUMA FONKSİYONU (ÇİFT YÖNLÜ LİSTE TERCİH SEBEBİ) ---
+ * Tail'den başlayarak Head'e doğru (en güncel hatadan eskiye) logları yazdırır.
+ */
+void display_logs_backward(SyslogList* list) {
+    printf("\n=== LINUX SYSLOG KAYITLARI (TERSTEN: EN GUNCELDEN ESKIYE) ===\n");
+    LogNode* current = list->tail;
+    
+    while (current != NULL) {
+        printf("[%s] [Seviye: %d] >> %s\n", current->timestamp, current->priority, current->message);
+        current = current->prev; // prev pointer'ı sayesinde geriye doğru gidiyoruz
+    }
+    printf("-------------------------------------------------------------\n");
+}
+
+/**
+ * --- 6. BELLEK YÖNETİMİ ---
+ * Program biterken ayrılan belleği (Memory Leak önlemek için) temizler.
+ */
+void free_logs(SyslogList* list) {
+    LogNode* current = list->head;
+    LogNode* temp;
+    
+    while (current != NULL) {
+        temp = current;
+        current = current->next;
+        free(temp);
+    }
+    init_list(list); // Temizlik sonrası listeyi sıfırla
+    printf("\nSistem mesaji: Ayrilan tum dinamik bellek (%d adet dugum) basariyla temizlendi.\n", list->total_logs);
+}
+
+int main() {
+    SyslogList syslog_list;
+    init_list(&syslog_list);
+
+    // Simülasyon: Örnek günlük kayıtlarının sisteme işlenmesi.
+    add_log(&syslog_list, 1, "Sistem baslatildi. Kernel yukleniyor.");
+    add_log(&syslog_list, 2, "Kullanici giris denemesi: admin");
+    add_log(&syslog_list, 4, "Ağ baglantisi kuruldu: eth0");
+    add_log(&syslog_list, 0, "UYARI: Islemci sicakligi kritik seviyeye ulasti!");
+    add_log(&syslog_list, 0, "KRITIK: Sistem beklenmeyen bir sekilde kapandi.");
+
+    // Mevcut logların kullanıcıya sunulması.
+    display_logs_forward(&syslog_list);
+    
+    // Çift yönlü listenin gücünü gösteren fonksiyon.
+    display_logs_backward(&syslog_list);
+
+    // Program biterken kaynakların temizlenmesi.
+    free_logs(&syslog_list);
+
+    return 0;
+}
